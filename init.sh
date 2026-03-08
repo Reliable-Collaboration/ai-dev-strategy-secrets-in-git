@@ -132,7 +132,7 @@ echo ""
 
 cat > .sops.yaml << EOF
 creation_rules:
-  - path_regex: secrets/encrypted/.*\.enc\.yaml\$
+  - path_regex: secrets/.*\.yaml\$
     age: >-
       ${DEVELOPER_KEY},
       ${MASTER_PUBLIC}

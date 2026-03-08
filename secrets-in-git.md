@@ -234,7 +234,7 @@ This walkthrough is for an existing developer who needs to grant a new team memb
 
    ```yaml
    creation_rules:
-     - path_regex: secrets/encrypted/.*\.enc\.yaml$
+     - path_regex: secrets/.*\.yaml$
        age: >-
          age1existing...,
          age1newdev...,
@@ -299,7 +299,7 @@ Add the CI/CD public key alongside the developer keys:
 
 ```yaml
 creation_rules:
-  - path_regex: secrets/encrypted/.*\.enc\.yaml$
+  - path_regex: secrets/.*\.yaml$
     age: >-
       age1dev1...,
       age1dev2...,
@@ -434,7 +434,7 @@ The `.sops.yaml` file lives at the project root and lists all recipient public k
 
 ```yaml
 creation_rules:
-  - path_regex: secrets/encrypted/.*\.enc\.yaml$
+  - path_regex: secrets/.*\.yaml$
     age: >-
       age1dev1...,
       age1dev2...,
@@ -442,7 +442,7 @@ creation_rules:
     # dev1-name, dev2-name, master (break-glass)
 ```
 
-The `path_regex` ensures SOPS only applies these rules to files in `secrets/encrypted/` with the `.enc.yaml` extension.
+The `path_regex` ensures SOPS only applies these rules to YAML files under the `secrets/` directory. This covers both the unencrypted input files (used during `sops --encrypt`) and the encrypted output files.
 
 ### Convenience Scripts
 

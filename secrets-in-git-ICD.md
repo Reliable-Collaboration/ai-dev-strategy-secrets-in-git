@@ -279,6 +279,40 @@ These fixes follow a pattern: every script that writes sensitive output (plainte
 
 ---
 
+## 13. path_regex Must Match the Input File Path
+
+### Context
+
+During end-to-end testing of the complete workflow, `sops --encrypt` failed with "no matching creation rules found" even though `.sops.yaml` existed and contained valid keys.
+
+### What happened
+
+The original `path_regex` in `.sops.yaml` was:
+
+```yaml
+path_regex: secrets/encrypted/.*\.enc\.yaml$
+```
+
+This was designed to match the *output* file path (`secrets/encrypted/secrets.enc.yaml`). But SOPS matches `path_regex` against the **input** file path passed on the command line. The encrypt script passes the *unencrypted* source file (`secrets/unencrypted/secrets.yaml`) as input. That path does not match a regex anchored to `secrets/encrypted/`.
+
+This was a day-one blocker — every user following the Getting Started guide would hit this error on their first `encrypt.sh` run.
+
+### The fix
+
+Changed the regex to match any YAML file under `secrets/`:
+
+```yaml
+path_regex: secrets/.*\.yaml$
+```
+
+This covers both the unencrypted input files (matched during `sops --encrypt`) and the encrypted output files (matched during `sops --decrypt`). Updated in `init.sh` and all examples in `secrets-in-git.md`.
+
+### Why this matters for the future
+
+SOPS documentation does not make it obvious that `path_regex` matches against the input path. If the creation rules or file structure change in the future, test the actual `sops --encrypt` command before committing — do not assume the regex is correct based on the output path alone.
+
+---
+
 ## Unanswered Questions and Considerations
 
 ~~1. **Should the strategy include a template `.sops.yaml` and scaffold script?**~~ — Resolved in §7.
