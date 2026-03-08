@@ -79,6 +79,7 @@ project-root/
     encrypt.sh                # encrypts all files in unencrypted/
     decrypt.sh                # decrypts all files in encrypted/
     dotenv.sh                 # generates .env from a decrypted YAML file
+    add-developer.sh          # adds a developer's key and updates all encrypted files
 ```
 
 The `secrets/unencrypted/` directory and all `.env` files (`.env`, `.env.*`) are `.gitignored` and must never be committed. The `secrets/encrypted/` directory is committed and contains only SOPS-encrypted files.
@@ -106,17 +107,22 @@ Use one YAML file per environment. The naming convention is:
 | Staging | `staging.yaml` | `staging.enc.yaml` |
 | Production | `prod.yaml` | `prod.enc.yaml` |
 
-All three scripts accept an optional name argument (without extension) to operate on a single file. With no arguments, `encrypt.sh` and `decrypt.sh` process **all** files in their respective directories. The `dotenv.sh` script defaults to `secrets` if no name is given.
+All scripts accept an optional name argument (without extension) to operate on a single file. With no arguments, `encrypt.sh` and `decrypt.sh` process **all** files in their respective directories. The `dotenv.sh` script defaults to `secrets` if no name is given.
+
+`encrypt.sh` automatically skips files whose plaintext hasn't changed since the last encryption, so it is always safe to run without arguments — unchanged files won't produce noisy git diffs.
 
 ```bash
-# Single file (recommended for daily use — avoids re-encrypting unchanged files)
+# Single file
 ./secrets/encrypt.sh dev
 ./secrets/decrypt.sh dev
 ./secrets/dotenv.sh dev
 
-# All files (useful after key rotation or initial setup)
+# All files (encrypt.sh skips unchanged files automatically)
 ./secrets/encrypt.sh
 ./secrets/decrypt.sh
+
+# Force re-encrypt all files (needed after key rotation)
+./secrets/encrypt.sh --force
 ```
 
 ---
@@ -134,32 +140,24 @@ age --version
 sops --version
 ```
 
-### Step 2: Generate your developer key (if you don't already have one)
+### Step 2: Run the init script
 
-If you haven't used age before, generate your personal keypair:
-
-```bash
-age-keygen -o ~/.config/sops/age/keys.txt
-```
-
-This prints your public key to the terminal:
-
-```
-Public key: age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p
-```
-
-Save this public key — you'll need it in the next step. If you already have a key, find your public key with:
+From the project root, run the init script provided by this submodule:
 
 ```bash
-grep "public key:" ~/.config/sops/age/keys.txt
+./dev-strategies-tooling/ai-dev-strategy-secrets-in-git/init.sh
 ```
 
-### Step 3: Run the init script
+The script automatically finds your age key at the default location (`~/.config/sops/age/keys.txt`). If you don't have one yet, it generates one for you. No copy-pasting required.
 
-From the project root, run the init script provided by this submodule. Pass your public key as an argument:
+You can also pass your public key or key file explicitly if needed:
 
 ```bash
+# Pass a public key directly
 ./dev-strategies-tooling/ai-dev-strategy-secrets-in-git/init.sh age1ql3z7hjy...your-public-key
+
+# Pass a key file path
+./dev-strategies-tooling/ai-dev-strategy-secrets-in-git/init.sh ~/.config/sops/age/keys.txt
 ```
 
 The script will:
@@ -171,7 +169,7 @@ The script will:
 5. Copy `encrypt.sh`, `decrypt.sh`, and `dotenv.sh` into `secrets/`
 6. Create a starter `secrets/unencrypted/secrets.yaml`
 
-### Step 4: Store the break-glass private key
+### Step 3: Store the break-glass private key
 
 The init script prints the break-glass master private key to your terminal. It looks like:
 
@@ -187,12 +185,12 @@ AGE-SECRET-KEY-1QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ
 
 This is the only time this key is displayed. It is not saved anywhere on your machine or in the repository. If all developers lose their keys, this is the only way to recover the secrets.
 
-### Step 5: Add your first secrets and commit
+### Step 4: Add your first secrets and commit
 
 Edit the starter secrets file:
 
 ```bash
-vim secrets/unencrypted/secrets.yaml
+nano secrets/unencrypted/secrets.yaml
 ```
 
 Encrypt it:
@@ -204,7 +202,7 @@ Encrypt it:
 Commit the encrypted file, `.sops.yaml`, and the scripts:
 
 ```bash
-git add .sops.yaml secrets/encrypted/ secrets/encrypt.sh secrets/decrypt.sh secrets/dotenv.sh .gitignore
+git add .sops.yaml secrets/encrypted/ secrets/*.sh .gitignore
 git commit -m "Initialize encrypted secrets"
 ```
 
@@ -230,32 +228,31 @@ This walkthrough is for an existing developer who needs to grant a new team memb
 
 ### What the existing developer does
 
-1. Add the new developer's public key to `.sops.yaml`:
+Run the `add-developer.sh` script with the new developer's public key and an optional label:
 
-   ```yaml
-   creation_rules:
-     - path_regex: secrets/.*\.yaml$
-       age: >-
-         age1existing...,
-         age1newdev...,
-         age1master...
-   ```
+```bash
+./secrets/add-developer.sh age1newdev... alice
+```
 
-2. Re-encrypt the secrets so the new developer can decrypt them:
+The script accepts a public key string or a path to the new developer's key file:
 
-   ```bash
-   sops updatekeys secrets/encrypted/secrets.enc.yaml
-   ```
+```bash
+./secrets/add-developer.sh ~/alice-keys.txt alice
+```
 
-   Repeat for each encrypted file if you have more than one.
+It will:
 
-3. Commit and push:
+1. Add the key to `.sops.yaml`
+2. Run `sops updatekeys` on every encrypted file
+3. Print the commit commands
 
-   ```bash
-   git add .sops.yaml secrets/encrypted/
-   git commit -m "Add [name] to secrets recipients"
-   git push
-   ```
+Then commit and push:
+
+```bash
+git add .sops.yaml secrets/encrypted/
+git commit -m "Add alice to secrets recipients"
+git push
+```
 
 ### What the new developer does next
 
@@ -343,17 +340,17 @@ Once initialized, the day-to-day workflow is:
 ./secrets/decrypt.sh dev
 
 # Edit the plaintext file
-vim secrets/unencrypted/dev.yaml
+nano secrets/unencrypted/dev.yaml
 
-# Re-encrypt only that file
-./secrets/encrypt.sh dev
+# Re-encrypt (only changed files are re-encrypted)
+./secrets/encrypt.sh
 
 # Commit the encrypted file
 git add secrets/encrypted/dev.enc.yaml
 git commit -m "Update dev secrets"
 ```
 
-Use the single-file form (`encrypt.sh dev`) for daily work. Running `encrypt.sh` with no arguments re-encrypts **all** files, which produces git changes in every encrypted file even if only one plaintext changed (SOPS generates a new data key each time). Save the no-argument form for key rotation or initial setup.
+`encrypt.sh` tracks checksums of plaintext files and automatically skips unchanged ones, so it is safe to run without arguments as a habit — only files you actually edited will be re-encrypted. Use `--force` to re-encrypt all files after key rotation.
 
 Always use this decrypt → edit → encrypt workflow. Do **not** use `sops edit` (which edits encrypted files in-place via a temp file) — it bypasses the `secrets/unencrypted/` directory, leaving it stale and out of sync with the encrypted files. The `dotenv.sh` script and any application reading from `secrets/unencrypted/` would silently use outdated values.
 
@@ -450,11 +447,12 @@ The init script copies three scripts into the consuming project's `secrets/` dir
 
 | Script | Usage | Purpose |
 |--------|-------|---------|
-| `encrypt.sh [name]` | `./secrets/encrypt.sh` or `./secrets/encrypt.sh dev` | Encrypts `.yaml` files in `unencrypted/` to `.enc.yaml` files in `encrypted/` |
+| `encrypt.sh [--force] [name]` | `./secrets/encrypt.sh` or `./secrets/encrypt.sh dev` | Encrypts changed `.yaml` files in `unencrypted/` to `.enc.yaml` in `encrypted/`. Skips unchanged files. Use `--force` after key rotation. |
 | `decrypt.sh [name]` | `./secrets/decrypt.sh` or `./secrets/decrypt.sh dev` | Decrypts `.enc.yaml` files in `encrypted/` to `.yaml` files in `unencrypted/` |
 | `dotenv.sh [name]` | `./secrets/dotenv.sh` or `./secrets/dotenv.sh dev` | Converts a decrypted YAML file to `.env` at the project root |
+| `add-developer.sh <key> [label]` | `./secrets/add-developer.sh age1... alice` | Adds a developer's key to `.sops.yaml` and runs `sops updatekeys` on all encrypted files |
 
-All three scripts verify that `secrets/unencrypted/` and `.env` are gitignored before proceeding.
+The encrypt, decrypt, and dotenv scripts verify that `secrets/unencrypted/` and `.env` are gitignored before proceeding.
 
 ### Key Locations
 

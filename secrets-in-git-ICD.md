@@ -313,6 +313,90 @@ SOPS documentation does not make it obvious that `path_regex` matches against th
 
 ---
 
+## 14. Zero-Argument Init Script
+
+### Context
+
+The original `init.sh` required the developer to copy-paste their age public key as a command-line argument. This meant the Getting Started workflow was three steps before the init script even ran: install prerequisites, generate a keypair, find and copy the public key. The copy-paste step is unnecessary friction — the key file is on disk in a predictable location, and the script can read it directly.
+
+### Alternatives considered
+
+**Wrapper script** — A separate script that generates the key and calls `init.sh`. Adds another file to maintain and another thing to explain in the documentation.
+
+**Always generate a new key** — The init script generates a fresh keypair every time, ignoring any existing key. Simple, but would overwrite a developer's existing key or create a second one they don't need.
+
+### The decision
+
+Make `init.sh` work in three modes:
+
+1. **No arguments** (new default) — Look for an existing key at the default SOPS location (`$SOPS_AGE_KEY_FILE` or `~/.config/sops/age/keys.txt`). If found, extract the public key. If not found, generate a new keypair at that location. Either way, proceed without any copy-pasting.
+2. **Public key argument** (`age1...`) — Use the key directly. Backward compatible with the original interface.
+3. **File path argument** — Extract the public key from the specified file. Useful when the key is at a non-default location.
+
+Prerequisites were moved before key resolution so that `age-keygen` is available if a key needs to be generated.
+
+### Why this matters for the future
+
+The first experience a developer has with the strategy is running `init.sh`. Reducing it from "generate a key, find the public key, copy it, paste it into the command" to just "run the command" removes the most likely point of confusion. The explicit modes are preserved for automation and non-standard setups.
+
+---
+
+## 15. Scripted Developer Onboarding
+
+### Context
+
+Adding a new developer required three manual steps: editing `.sops.yaml` to insert the public key in the correct YAML format, running `sops updatekeys` on each encrypted file individually, and knowing the right commit commands. The `.sops.yaml` editing was particularly error-prone — the `age:` field uses a YAML folded scalar (`>-`) with comma-separated keys, and getting the indentation or commas wrong produces silent SOPS failures.
+
+### The decision
+
+Add an `add-developer.sh` convenience script that automates the entire process. The script:
+
+1. Accepts a public key string or a key file path (consistent with init.sh's interface)
+2. Validates the key and checks for duplicates
+3. Edits `.sops.yaml` programmatically (adds comma to the last key, inserts the new key with correct indentation)
+4. Optionally updates the comment line with the developer's name/label
+5. Runs `sops updatekeys -y` on every encrypted file
+
+This reduces "add a developer" from a multi-step manual process to a single command:
+
+```bash
+./secrets/add-developer.sh age1newdev... alice
+```
+
+### Why this matters for the future
+
+Every manual editing step in `.sops.yaml` is a chance for a YAML formatting mistake that breaks SOPS silently. The script eliminates that risk. It also makes the process self-documenting — a new team lead does not need to understand SOPS internals to onboard someone.
+
+---
+
+## 16. Checksum-Based Skip in encrypt.sh
+
+### Context
+
+SOPS generates a new random data key on every `sops --encrypt`, so encrypting the same plaintext twice produces different ciphertext. Running `encrypt.sh` without arguments would re-encrypt every file, creating noisy git diffs in files the developer never touched. The original mitigation was to recommend single-file mode (`encrypt.sh dev`) for daily work, but this required the developer to remember which files they changed — exactly the kind of mental overhead that leads to mistakes.
+
+### Alternatives considered
+
+**Diff against the encrypted file** — Decrypt the existing encrypted file to a temp location and compare it against the plaintext. If identical, skip. This works but requires an extra SOPS decrypt operation per file, which is slow and requires the developer's private key to be available just to check.
+
+**Timestamp comparison** — Skip if the plaintext file's mtime is older than the encrypted file. Simple, but unreliable: `git checkout`, `cp`, and editors that write to a temp file then rename all reset mtime. A file could be unchanged but appear newer.
+
+**Checksum of the plaintext** — After each successful encryption, store a SHA-256 hash of the plaintext. Before encrypting, compare the current hash against the stored one. If identical and the encrypted file exists, skip. Reliable, fast (one hash per file), and no SOPS dependency for the check.
+
+### The decision
+
+Use plaintext checksums stored in `secrets/unencrypted/.checksums`. This file is automatically gitignored (it lives inside the gitignored `unencrypted/` directory). The format is `sha256hash  filename.yaml`, one line per file.
+
+The `--force` flag bypasses checksum comparison for cases that genuinely need full re-encryption (key rotation via `sops updatekeys`, or recovering from a corrupted checksums file).
+
+This changes the recommended workflow: developers can now run `encrypt.sh` with no arguments as a habit after any editing session. Only files that actually changed get re-encrypted. The single-file form still works but is no longer necessary to avoid noisy diffs.
+
+### Why this matters for the future
+
+The safest developer habit is "always run encrypt before committing" without needing to think about which files changed. The checksum approach makes this a zero-cost operation for unchanged files while preserving correctness for changed ones. If the checksums file is lost (fresh clone, manual deletion), the worst case is a one-time re-encryption of all files — not data loss.
+
+---
+
 ## Unanswered Questions and Considerations
 
 ~~1. **Should the strategy include a template `.sops.yaml` and scaffold script?**~~ — Resolved in §7.

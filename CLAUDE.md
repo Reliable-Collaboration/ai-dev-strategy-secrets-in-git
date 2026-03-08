@@ -24,6 +24,7 @@ Design history (read before making changes): [secrets-in-git-ICD.md](./secrets-i
 - `scripts/encrypt.sh` — Template script: encrypts YAML files in `unencrypted/` to `encrypted/` (single file or all)
 - `scripts/decrypt.sh` — Template script: decrypts `.enc.yaml` files in `encrypted/` to `unencrypted/` (single file or all)
 - `scripts/dotenv.sh` — Template script: converts a decrypted YAML file to `.env` at the project root
+- `scripts/add-developer.sh` — Template script: adds a developer's key to `.sops.yaml` and runs `sops updatekeys`
 
 ## How It Works (Summary)
 
@@ -43,7 +44,7 @@ project-root/
   secrets/
     unencrypted/              # Plaintext secrets (.gitignored)
     encrypted/                # SOPS-encrypted secrets (committed)
-    encrypt.sh, decrypt.sh, dotenv.sh
+    encrypt.sh, decrypt.sh, dotenv.sh, add-developer.sh
 ```
 
 ## Key Conventions

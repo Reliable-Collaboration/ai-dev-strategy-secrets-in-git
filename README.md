@@ -23,16 +23,13 @@ This repository is intended to be added as a **git submodule** in consuming proj
 # Add as a submodule
 git submodule add <repo-url> dev-strategies-tooling/ai-dev-strategy-secrets-in-git
 
-# Generate your age keypair (if you don't have one)
-age-keygen -o ~/.config/sops/age/keys.txt
-
-# Initialize secrets in your project (pass your public key)
-./dev-strategies-tooling/ai-dev-strategy-secrets-in-git/init.sh age1your-public-key...
+# Initialize (auto-detects or creates your age key — no copy-pasting)
+./dev-strategies-tooling/ai-dev-strategy-secrets-in-git/init.sh
 
 # Store the break-glass master key that is printed — it won't be shown again
 
 # Edit and encrypt your first secrets
-vim secrets/unencrypted/secrets.yaml
+nano secrets/unencrypted/secrets.yaml
 ./secrets/encrypt.sh
 git add .sops.yaml secrets/encrypted/ secrets/*.sh .gitignore
 git commit -m "Initialize encrypted secrets"

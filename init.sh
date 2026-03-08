@@ -3,7 +3,15 @@ set -euo pipefail
 
 # Secrets in Git — Project Initialization Script
 # This script scaffolds the secrets directory structure in a consuming project.
-# Run from the project root: ./path/to/this/submodule/init.sh <your-age-public-key>
+#
+# Usage (zero-friction — auto-detects or creates your age key):
+#   ./path/to/this/submodule/init.sh
+#
+# Or pass your public key explicitly:
+#   ./path/to/this/submodule/init.sh age1your-public-key...
+#
+# Or pass the path to your key file:
+#   ./path/to/this/submodule/init.sh ~/.config/sops/age/keys.txt
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -12,26 +20,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if ! git rev-parse --is-inside-work-tree &> /dev/null; then
   echo "Error: Not inside a git repository."
   echo "Run this script from the root of your project's git repository."
-  exit 1
-fi
-
-# --- Validate arguments ---
-
-if [[ $# -lt 1 ]]; then
-  echo "Usage: $0 <your-age-public-key>"
-  echo ""
-  echo "  your-age-public-key   Your age public key (starts with 'age1')"
-  echo ""
-  echo "If you don't have one yet, generate it with:"
-  echo "  age-keygen -o ~/.config/sops/age/keys.txt"
-  exit 1
-fi
-
-DEVELOPER_KEY="$1"
-
-if [[ ! "$DEVELOPER_KEY" =~ ^age1 ]]; then
-  echo "Error: Public key must start with 'age1'. Got: $DEVELOPER_KEY"
-  echo "Make sure you're passing your PUBLIC key, not your private key."
   exit 1
 fi
 
@@ -47,6 +35,65 @@ fi
 if ! command -v sops &> /dev/null; then
   echo "Error: 'sops' is not installed. Install it first:"
   echo "  https://github.com/getsops/sops/releases"
+  exit 1
+fi
+
+# --- Resolve developer public key ---
+
+DEFAULT_KEY_FILE="${SOPS_AGE_KEY_FILE:-${XDG_CONFIG_HOME:-$HOME/.config}/sops/age/keys.txt}"
+
+extract_public_key() {
+  local file="$1"
+  grep "public key:" "$file" | head -1 | awk '{print $NF}'
+}
+
+if [[ $# -ge 1 ]]; then
+  if [[ "$1" =~ ^age1 ]]; then
+    # Direct public key provided (backward compatible)
+    DEVELOPER_KEY="$1"
+  elif [[ -f "$1" ]]; then
+    # File path provided — extract public key from it
+    DEVELOPER_KEY=$(extract_public_key "$1")
+    if [[ -z "$DEVELOPER_KEY" ]]; then
+      echo "Error: Could not extract a public key from $1"
+      echo "The file should contain a line like: # public key: age1..."
+      exit 1
+    fi
+    echo "Extracted public key from $1"
+  else
+    echo "Error: '$1' is not a valid public key (must start with 'age1') or file path."
+    echo ""
+    echo "Usage: $0 [age1-public-key | /path/to/keys.txt]"
+    echo ""
+    echo "Or run with no arguments to auto-detect your key."
+    exit 1
+  fi
+else
+  # No arguments — auto-detect or create key at the default location
+  if [[ -f "$DEFAULT_KEY_FILE" ]]; then
+    DEVELOPER_KEY=$(extract_public_key "$DEFAULT_KEY_FILE")
+    if [[ -z "$DEVELOPER_KEY" ]]; then
+      echo "Error: Found $DEFAULT_KEY_FILE but could not extract a public key from it."
+      exit 1
+    fi
+    echo "Found existing age key: $DEVELOPER_KEY"
+  else
+    echo "No age key found at $DEFAULT_KEY_FILE — generating one..."
+    mkdir -p "$(dirname "$DEFAULT_KEY_FILE")"
+    age-keygen -o "$DEFAULT_KEY_FILE" 2>&1
+    DEVELOPER_KEY=$(extract_public_key "$DEFAULT_KEY_FILE")
+    if [[ -z "$DEVELOPER_KEY" ]]; then
+      echo "Error: Failed to generate age key."
+      exit 1
+    fi
+    echo ""
+    echo "Generated new age key: $DEVELOPER_KEY"
+    echo "Private key saved to: $DEFAULT_KEY_FILE"
+  fi
+fi
+
+if [[ ! "$DEVELOPER_KEY" =~ ^age1 ]]; then
+  echo "Error: Resolved key does not start with 'age1'. Got: $DEVELOPER_KEY"
   exit 1
 fi
 
@@ -146,9 +193,10 @@ echo "Created .sops.yaml with your key and the master key"
 cp "$SCRIPT_DIR/scripts/encrypt.sh" secrets/encrypt.sh
 cp "$SCRIPT_DIR/scripts/decrypt.sh" secrets/decrypt.sh
 cp "$SCRIPT_DIR/scripts/dotenv.sh" secrets/dotenv.sh
-chmod +x secrets/encrypt.sh secrets/decrypt.sh secrets/dotenv.sh
+cp "$SCRIPT_DIR/scripts/add-developer.sh" secrets/add-developer.sh
+chmod +x secrets/encrypt.sh secrets/decrypt.sh secrets/dotenv.sh secrets/add-developer.sh
 
-echo "Copied encrypt.sh, decrypt.sh, and dotenv.sh to secrets/"
+echo "Copied encrypt.sh, decrypt.sh, dotenv.sh, and add-developer.sh to secrets/"
 
 # --- Create starter secrets file ---
 
@@ -172,5 +220,5 @@ echo ""
 echo "  1. STORE THE BREAK-GLASS PRIVATE KEY (shown above) in a secure location"
 echo "  2. Edit secrets/unencrypted/secrets.yaml with your secrets"
 echo "  3. Run ./secrets/encrypt.sh to encrypt"
-echo "  4. Commit: git add .sops.yaml secrets/encrypted/ secrets/encrypt.sh secrets/decrypt.sh secrets/dotenv.sh .gitignore"
+echo "  4. Commit: git add .sops.yaml secrets/encrypted/ secrets/*.sh .gitignore"
 echo ""
