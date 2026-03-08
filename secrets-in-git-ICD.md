@@ -1,6 +1,6 @@
 # Secrets in Git: Intentions, Considerations, and Decisions
 
-**Status:** ICD file for [Secrets in Git](./secrets-in-git.md). Captures the reasoning journey behind the secrets management strategy.
+**Status:** ICD file for [Secrets in Git](./secrets-in-git.md). Follows [Intentional Specification](https://github.com/Reliable-Collaboration/intentional-specification). Captures the reasoning journey behind the secrets management strategy.
 
 ---
 
